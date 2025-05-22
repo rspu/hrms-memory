@@ -27,6 +27,9 @@ type GameState = "start" | "playing" | "completed"
 // Special value for "All Teams" option
 const ALL_TEAMS_ID = -1
 
+// Minimum number of members required for a team to be selectable
+const MIN_TEAM_MEMBERS = 5
+
 export function MemoryGame() {
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null)
   const [cards, setCards] = useState<CardType[]>([])
@@ -39,6 +42,7 @@ export function MemoryGame() {
   const [showConfetti, setShowConfetti] = useState<boolean>(false)
   const [playerName, setPlayerName] = useState<string>("")
   const [teams, setTeams] = useState<Team[]>([])
+  const [filteredTeams, setFilteredTeams] = useState<Team[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [selectedTeamName, setSelectedTeamName] = useState<string>("")
@@ -58,14 +62,7 @@ export function MemoryGame() {
         // Sort teams alphabetically by name
         const sortedTeams = [...availableTeams].sort((a, b) => a.name.localeCompare(b.name))
 
-        // Add "All Teams" option at the top
-        const teamsWithAll = [{ id: ALL_TEAMS_ID, name: "Alle Teams" }, ...sortedTeams]
-
-        setTeams(teamsWithAll)
-
-        // Set "All Teams" as the default selection
-        setSelectedTeamId(ALL_TEAMS_ID)
-        setSelectedTeamName("Alle Teams")
+        setTeams(sortedTeams)
 
         // Load members from all teams
         const allMembers = await loadAllTeamMembers()
@@ -83,6 +80,36 @@ export function MemoryGame() {
         })
 
         setMemberTeamNames(teamNamesMap)
+
+        // Count members per team and filter out teams with fewer than MIN_TEAM_MEMBERS
+        const teamMemberCounts = new Map<number, number>()
+
+        // Count members for each team
+        allMembers.forEach((member) => {
+          member.teamIds.forEach((teamId) => {
+            teamMemberCounts.set(teamId, (teamMemberCounts.get(teamId) || 0) + 1)
+          })
+        })
+
+        // Filter teams with at least MIN_TEAM_MEMBERS members
+        const teamsWithEnoughMembers = sortedTeams.filter(
+          (team) => (teamMemberCounts.get(team.id) || 0) >= MIN_TEAM_MEMBERS,
+        )
+
+        // Add "All Teams" option at the top if there are enough members overall
+        const teamsWithAll =
+          allMembers.length >= MIN_TEAM_MEMBERS
+            ? [{ id: ALL_TEAMS_ID, name: "Alle Teams" }, ...teamsWithEnoughMembers]
+            : teamsWithEnoughMembers
+
+        setFilteredTeams(teamsWithAll)
+
+        // Set "All Teams" as the default selection if available
+        if (teamsWithAll.length > 0) {
+          const defaultTeam = teamsWithAll[0]
+          setSelectedTeamId(defaultTeam.id)
+          setSelectedTeamName(defaultTeam.name)
+        }
       } catch (error) {
         console.error("Error loading initial data:", error)
       } finally {
@@ -321,8 +348,8 @@ export function MemoryGame() {
     const cardCount = cards.length
 
     if (cardCount <= 10) return "grid-cols-2 sm:grid-cols-5 gap-3 md:gap-4"
-    if (cardCount <= 16) return "grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 md:gap-4"
-    return "grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3 md:gap-4"
+    if (cardCount <= 16) return "grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3 md:gap-4"
+    return "grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3 md:gap-4"
   }
 
   // Get team member by ID
@@ -508,6 +535,24 @@ export function MemoryGame() {
     )
   }
 
+  // Show message if no teams have enough members
+  if (filteredTeams.length === 0 && !loading) {
+    return (
+      <div className="flex justify-center items-center p-8">
+        <div className="text-center bg-white/20 backdrop-blur-sm rounded-xl shadow-lg border border-white/30 p-6 max-w-md">
+          <h2 className="text-xl fluffy-title text-slate-800 mb-4">Keine Teams verfügbar</h2>
+          <p className="text-slate-800 mb-4">
+            Es gibt derzeit keine Teams mit mindestens {MIN_TEAM_MEMBERS} Mitgliedern, die für das Spiel benötigt
+            werden.
+          </p>
+          <p className="text-slate-800">
+            Bitte füge mehr Teammitglieder hinzu oder reduziere die Mindestanzahl an Teammitgliedern.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
       {showConfetti && <Confetti />}
@@ -518,7 +563,7 @@ export function MemoryGame() {
             <h2 className="text-xl fluffy-title text-slate-800">Lerne unser Team kennen - Memory-Spiel</h2>
           </div>
           <p className="text-slate-800 text-center text-sm font-medium fluffy-subtitle">
-            Finde Paare von Teammitgliedern, um mehr über unsere Mitarbeiter zu erfahren!
+            Lerne das Team spielerisch kennen – finde die passenden Fotos und entdecke, wer wer ist!
           </p>
 
           <div className="w-full max-w-xs">
@@ -543,13 +588,16 @@ export function MemoryGame() {
                 <SelectValue placeholder="Team auswählen" />
               </SelectTrigger>
               <SelectContent>
-                {teams.map((team) => (
+                {filteredTeams.map((team) => (
                   <SelectItem key={team.id} value={team.id.toString()}>
                     {team.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-slate-600 mt-1">
+              Nur Teams mit mindestens {MIN_TEAM_MEMBERS} Mitgliedern werden angezeigt.
+            </p>
           </div>
 
           {getDifficultyOptions()}
@@ -627,7 +675,25 @@ export function MemoryGame() {
           {gameState === "completed" && (
             <div className="p-4 bg-white rounded-xl shadow-md mb-2">
               <div className="text-center mb-4">
-                <h2 className="text-xl font-bold fluffy-title text-primary mb-2">Glückwunsch!</h2>
+                <div className="flex items-center justify-center gap-3 mb-2">
+                  <div className="relative w-12 h-12 sm:w-16 sm:h-16 animate-bounce-slow">
+                    <Image
+                      src="/images/fluffy_unicorn_final.png"
+                      alt="Fluffy Unicorn"
+                      fill
+                      className="object-contain drop-shadow-md"
+                    />
+                  </div>
+                  <h2 className="text-xl font-bold fluffy-title text-primary">Glückwunsch!</h2>
+                  <div className="relative w-12 h-12 sm:w-16 sm:h-16 animate-bounce-slow">
+                    <Image
+                      src="/images/fluffy_unicorn_final.png"
+                      alt="Fluffy Unicorn"
+                      fill
+                      className="object-contain drop-shadow-md"
+                    />
+                  </div>
+                </div>
                 <p className="text-gray-700 mb-3">
                   Du hast alle {getPairsCount()} Paare mit {moves} Zügen gefunden!
                 </p>
@@ -661,9 +727,13 @@ export function MemoryGame() {
             </div>
           )}
 
-          <div className={`grid ${getGridColumns()} gap-2 max-w-4xl mx-auto`}>
+          <div className={`grid ${getGridColumns()} gap-3 md:gap-4 max-w-5xl mx-auto`}>
             {cards.map((card) => (
-              <div key={card.id} className="perspective-1000 w-full sm:w-auto" onClick={() => handleCardClick(card.id)}>
+              <div
+                key={card.id}
+                className="perspective-1000 w-full min-w-[120px] sm:min-w-[140px] md:min-w-[160px]"
+                onClick={() => handleCardClick(card.id)}
+              >
                 <div
                   className={`
                     cursor-pointer w-full aspect-[3/4] flex items-center justify-center
